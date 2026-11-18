@@ -1,169 +1,56 @@
-import useSWR from 'swr';
+import React from 'react';
 import Link from 'next/link';
 import { useUser } from '../utils/auth/useUser';
-import { app, db, getCustomClaimRole } from '../utils/auth/initFirebase';
-import getStripe from '../utils/getStripe';
-
-const fetcher = (url, token) =>
-  fetch(url, {
-    method: 'GET',
-    headers: new Headers({ 'Content-Type': 'application/json', token }),
-    credentials: 'same-origin',
-  }).then((res) => res.json());
-
-async function getProducts() {
-  return await db()
-    .collection('product')
-    .where('active', '==', true)
-    .get()
-    .then(unwrapCollection);
-}
-
-function unwrapCollection(collection) {
-  const arr = [];
-  collection.forEach((doc) => arr.push(unwrapDoc(doc)));
-  return arr;
-}
-
-function unwrapDoc(doc) {
-  console.log(doc.data());
-  return {
-    ...doc.data(),
-    id: doc.id,
-  };
-}
+import { loadProducts, loadContent, watchSubscription, portalUrl, checkoutUrl } from '../utils/firebase-data.mjs';
 
 const Index = () => {
-  const { user, logout } = useUser();
-
+  const { user, loading, error: authError, logout } = useUser();
   const [products, setProducts] = React.useState([]);
   const [basicContent, setBasicContent] = React.useState([]);
   const [premiumContent, setPremiumContent] = React.useState([]);
-  const [message, setMessage] = React.useState();
+  const [message, setMessage] = React.useState('');
+  const [error, setError] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
+  const checkout = React.useRef(null);
 
   React.useEffect(() => {
-    if (!user) {
-      return;
-    }
-    db()
-      .collection('product')
-      .where('active', '==', true)
-      .get()
-      .then(async function (querySnapshot) {
-        querySnapshot.forEach(async function (productDoc) {
-          console.log(productDoc.id, ' => ', productDoc.data());
-          const product = productDoc.data();
-          const priceSnap = await productDoc.ref
-            .collection('prices')
-            .orderBy('unit_amount')
-            .get();
-
-          priceSnap.forEach(async (doc) => {
-            console.log(doc.id, ' => ', doc.data());
-            const priceId = doc.id;
-            const priceData = doc.data();
-            const content = `${new Intl.NumberFormat('en-US', {
-              style: 'currency',
-              currency: priceData.currency,
-            }).format((priceData.unit_amount / 100).toFixed(2))} per ${
-              priceData.interval
-            }`;
-            if (!message) {
-              setProducts((p) => [
-                ...p,
-                {
-                  priceId,
-                  value: priceId,
-                  content,
-                },
-              ]);
-            }
-          });
-        });
-      });
-
-    db()
-      .collection('customer')
-      .doc(user.id)
-      .collection('subscriptions')
-      .where('status', '==', 'active')
-      .onSnapshot(async (snapshot) => {
-        if (snapshot.empty) {
-          return;
-        }
-        const subscription = snapshot.docs[0].data();
-        const priceData = (await subscription.price.get()).data();
-        const msg = `You are paying ${new Intl.NumberFormat('en-US', {
-          style: 'currency',
-          currency: priceData.currency,
-        }).format((priceData.unit_amount / 100).toFixed(2))} per ${
-          priceData.interval
-        }, giving you the role: ${await getCustomClaimRole()}. 🥳`;
-
-        setMessage(msg);
-      });
-
-    db()
-      .collection('content-basic')
-      .get()
-      .then(unwrapCollection)
-      .then(
-        (content) => setBasicContent(content),
-        (e) => console.log(e)
-      );
-
-    db()
-      .collection('content-premium')
-      .get()
-      .then(unwrapCollection)
-      .then(
-        (content) => setPremiumContent(content),
-        (e) => console.log(e)
-      );
-  }, [setProducts, user, setMessage, setPremiumContent, setBasicContent]);
+    let active = true;
+    setProducts([]); setBasicContent([]); setPremiumContent([]); setMessage(''); setError('');
+    if (!user?.id) return;
+    const fail = () => { if (active) setError('Some account data is unavailable. Please try again later.'); };
+    loadProducts().then(data => { if (active) setProducts(data); }).catch(fail);
+    const unsubscribe = watchSubscription(value => {
+      if (!active) return;
+      setMessage(value);
+      loadContent('content-basic').then(data => { if (active) setBasicContent(data); }).catch(() => { if (active) setBasicContent([]); });
+      loadContent('content-premium').then(data => { if (active) setPremiumContent(data); }).catch(() => { if (active) setPremiumContent([]); });
+    }, fail);
+    return () => { active = false; unsubscribe(); checkout.current?.abort(); };
+  }, [user?.id]);
 
   const goToBillingPortal = async () => {
-    // Call billing portal function
-    setIsLoading(true);
-    const functionRef = app()
-      .functions('us-central1')
-      .httpsCallable('ext-firestore-stripe-subscriptions-createPortalLink');
-    const { data } = await functionRef({ returnUrl: window.location.origin });
-    window.location.assign(data.url);
+    setIsLoading(true); setError('');
+    try { window.location.assign(await portalUrl()); }
+    catch { setError('Unable to open billing. Please try again later.'); setIsLoading(false); }
   };
-
-  const subscribe = async (priceId) => {
-    setIsLoading(true);
-    const thing = await db()
-      .collection('customer')
-      .doc(user.id)
-      .collection('checkout_sessions')
-      .add({
-        price: priceId,
-        success_url: window.location.origin,
-        cancel_url: window.location.origin,
-      });
-
-    thing.onSnapshot(async (snap) => {
-      const { sessionId } = snap.data();
-      if (sessionId) {
-        // We have a session, let's redirect to Checkout
-        // Init Stripe
-        const stripe = await getStripe();
-        stripe.redirectToCheckout({ sessionId });
-      }
-    });
+  const subscribe = async priceId => {
+    if (!products.some(product => product.priceId === priceId) || isLoading) return;
+    setIsLoading(true); setError('');
+    checkout.current?.abort();
+    checkout.current = new AbortController();
+    try { window.location.assign(await checkoutUrl(priceId, window.location.origin, { signal: checkout.current.signal })); }
+    catch { setError('Unable to start checkout. Please try again later.'); setIsLoading(false); }
   };
+  if (loading) return <p role="status">Loading account…</p>;
   if (!user) {
     return (
       <div className="mx-auto max-w-xl my-4 bg-white">
         <div className="shadow-md rounded-lg">
           <div className="shadow-xs rounded-lg p-4 space-y-4">
             <p>Hi there!</p>
-            <p>You are not signed in. </p>{' '}
+            <p>You are not signed in. </p>{authError && <p role="alert">{authError}</p>}{' '}
             <div>
-              <Link href={'/auth'}>
+              <Link legacyBehavior href={'/auth'}>
                 <a className="px-4  py-2 bg-gray-300 rounded-md text-gray-900 font-medium  hover:bg-gray-400 transition duration-150 ease-in active:bg-gray-400">
                   Sign in
                 </a>
@@ -185,10 +72,10 @@ const Index = () => {
     <div>
       <div className="mx-auto max-w-xl flex items-center justify-between py-2">
         <div className="space-x-3">
-          <Link href={'/'}>
+          <Link legacyBehavior href={'/'}>
             <a>Home</a>
           </Link>
-          <Link href={'/example'}>
+          <Link legacyBehavior href={'/example'}>
             <a>Another Page</a>
           </Link>
         </div>
@@ -209,7 +96,7 @@ const Index = () => {
           <div className="shadow-xs rounded-lg p-4 space-y-4">
             <div className="space-y-4">
               <p>You're signed in.</p>
-              <p>{message}</p>
+              <p>{message}</p>{(error || authError) && <p role="alert">{error || authError}</p>}
 
               <div className="space-x-3">
                 <button

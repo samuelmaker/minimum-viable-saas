@@ -4,38 +4,44 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "node --test test/security.test.mjs",
+    "test:emulators": "node --test test/firebase.emulator.test.mjs"
   },
   "dependencies": {
-    "@stripe/stripe-js": "^1.8.0",
-    "firebase": "^7.15.5",
-    "firebase-admin": "^8.12.1",
-    "js-cookie": "2.2.1",
-    "next": "latest",
-    "react": "^16.13.1",
-    "react-dom": "^16.13.1",
-    "react-firebaseui": "4.1.0",
-    "swr": "0.2.3"
+    "firebase": "^13.4.0",
+    "next": "^15.5.29",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@tailwindcss/custom-forms": "^0.2.1",
-    "@tailwindcss/typography": "^0.2.0",
-    "autoprefixer": "^9.8.5",
-    "postcss": "^7.0.32",
-    "postcss-preset-env": "^6.7.0",
-    "tailwindcss": "^1.5.1"
+    "@tailwindcss/typography": "^0.5.19",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.30",
+    "tailwindcss": "^3.4.19",
+    "@firebase/rules-unit-testing": "^6.0.0"
   },
   "browserslist": {
     "production": [
       ">0.2%",
       "not dead",
-      "ie 11"
+      "not op_mini all"
     ],
     "development": [
       "last 1 chrome version",
       "last 1 firefox version",
-      "last 1 safari version",
-      "ie 11"
+      "last 1 safari version"
     ]
+  },
+  "resolutions": {
+    "next/postcss": "^8.5.30",
+    "**/@tailwindcss/typography/postcss-selector-parser": "^6.1.6",
+    "**/sucrase/glob": "^14.0.2",
+    "**/@grpc/grpc-js": "^1.14.7",
+    "**/anymatch/picomatch": "^2.3.2",
+    "**/readdirp/picomatch": "^2.3.2"
+  },
+  "engines": {
+    "node": ">=22.13"
   }
 }
