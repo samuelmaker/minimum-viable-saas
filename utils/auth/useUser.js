@@ -1,42 +1,41 @@
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/router'
-import cookies from 'js-cookie'
-import firebase from 'firebase/app'
-import 'firebase/auth'
-import initFirebase from '../auth/initFirebase'
+import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/router';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { getFirebase, clearLegacyAuthCookie } from './firebase-client.mjs';
 
-initFirebase()
-
-const useUser = () => {
-  const [user, setUser] = useState()
-  const router = useRouter()
-
-  const logout = async () => {
-    return firebase
-      .auth()
-      .signOut()
-      .then(() => {
-        // Sign-out successful.
-        cookies.remove('auth')
-        setUser()
-        router.push('/auth')
-      })
-      .catch((e) => {
-        console.error(e)
-      })
-  }
+export function useUser() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const router = useRouter();
 
   useEffect(() => {
-    const cookie = cookies.get('auth')
-    if (!cookie) {
-      router.push('/')
-      return
+    clearLegacyAuthCookie();
+    try {
+      return onAuthStateChanged(getFirebase().auth, current => {
+        // Identity comes exclusively from the Firebase SDK, never an auth cookie.
+        setUser(current ? { id: current.uid, email: current.email } : null);
+        setLoading(false);
+      }, () => {
+        setUser(null);
+        setError('Sign-in is unavailable. Please try again later.');
+        setLoading(false);
+      });
+    } catch {
+      setError('Sign-in is unavailable. Please try again later.');
+      setLoading(false);
     }
-    setUser(JSON.parse(cookie))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, []);
 
-  return { user, logout }
+  const logout = useCallback(async () => {
+    try {
+      await signOut(getFirebase().auth);
+      clearLegacyAuthCookie();
+      await router.push('/auth');
+    } catch {
+      setError('Unable to sign out. Please try again.');
+    }
+  }, [router]);
+
+  return { user, loading, error, logout };
 }
-
-export { useUser }

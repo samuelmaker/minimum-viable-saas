@@ -1,0 +1,37 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function owner(uid) { return request.auth != null && request.auth.uid == uid; }
+    match /customer/{uid} {
+      allow read: if owner(uid);
+      allow write: if false;
+      match /checkout_sessions/{id} {
+        allow read: if owner(uid);
+        allow create: if owner(uid)
+          && request.resource.data.keys().hasOnly(['price', 'success_url', 'cancel_url'])
+          && request.resource.data.price is string
+          && request.resource.data.price.size() > 0 && request.resource.data.price.size() <= 200
+          && request.resource.data.success_url is string
+          && request.resource.data.cancel_url is string
+          && request.resource.data.success_url.size() <= 2048
+          && request.resource.data.cancel_url.size() <= 2048;
+        allow update, delete: if false;
+      }
+      match /subscriptions/{id} { allow read: if owner(uid); allow write: if false; }
+      match /payments/{id} { allow read: if owner(uid); allow write: if false; }
+    }
+    match /product/{id} {
+      allow read: if true;
+      allow write: if false;
+      match /prices/{price} { allow read: if true; allow write: if false; }
+    }
+    match /content-basic/{id} {
+      allow read: if request.auth != null && request.auth.token.stripeRole in ['basic', 'premium'];
+      allow write: if false;
+    }
+    match /content-premium/{id} {
+      allow read: if request.auth != null && request.auth.token.stripeRole == 'premium';
+      allow write: if false;
+    }
+  }
+}

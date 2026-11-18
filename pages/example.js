@@ -7,7 +7,7 @@ const Example = (props) => {
         This page is static because it does not fetch any data or include the
         authed user info.
       </p>
-      <Link href={'/'}>
+      <Link legacyBehavior href={'/'}>
         <a>Home</a>
       </Link>
     </div>
